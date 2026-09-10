@@ -166,6 +166,8 @@ def delete_patient(
     doctor may call this endpoint."""
     profile = db.get(PatientProfile, patient_id)
     if not profile:
+        profile = db.query(PatientProfile).filter(PatientProfile.user_id == patient_id).first()
+    if not profile:
         raise HTTPException(status_code=404, detail="Patient not found.")
     if profile.doctor_id != doctor.id:
         raise HTTPException(status_code=403, detail="Not your patient.")
@@ -174,7 +176,7 @@ def delete_patient(
 
     # Delete child rows first to satisfy foreign-key constraints
     db.query(AssessmentResult).filter(
-        AssessmentResult.patient_id == patient_id
+        AssessmentResult.patient_id == profile.id
     ).delete(synchronize_session=False)
 
     db.query(Message).filter(

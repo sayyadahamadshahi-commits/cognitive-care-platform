@@ -11389,8 +11389,7 @@
         const session = DataLayer.getSession(sessionId);
         if (!session) return '<p>Session not found.</p>';
 
-        const age = DataLayer.getPatientAge(patientId);
-        const sex = patient.sex;
+        const taskResults = session.taskResults || [];
         const questionnaireResults = session.questionnaireResults || [];
 
         if (taskResults.length === 0 && questionnaireResults.length === 0) {

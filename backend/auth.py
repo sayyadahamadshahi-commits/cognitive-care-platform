@@ -96,8 +96,10 @@ def require_provider(user: User = Depends(get_current_user)) -> User:
 
 
 def authorize_patient_access(patient_profile_id: str, user: User, db: Session) -> PatientProfile:
-    """Loads a PatientProfile by id and raises 404/403 unless user is allowed."""
+    """Loads a PatientProfile by id (or user_id fallback) and raises 404/403 unless user is allowed."""
     profile = db.get(PatientProfile, patient_profile_id)
+    if not profile:
+        profile = db.query(PatientProfile).filter(PatientProfile.user_id == patient_profile_id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Patient not found.")
 

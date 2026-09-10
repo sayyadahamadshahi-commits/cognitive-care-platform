@@ -11648,10 +11648,15 @@
           let serverPatients = [];
           if (user.role === 'doctor' || user.role === 'caregiver') {
             const res = await AuthLayer.authFetch('/api/patients');
-            serverPatients = await res.json();
-          } else if (user.role === 'patient' && user.patient_id) {
+            if (res.ok) {
+              serverPatients = await res.json();
+            }
+          } else if (user.role === 'patient') {
             const res = await AuthLayer.authFetch('/api/patients/me');
-            serverPatients = [await res.json()];
+            if (res.ok) {
+              const pData = await res.json();
+              if (pData && pData.id) serverPatients = [pData];
+            }
           }
 
           this.patients = {};
@@ -11672,40 +11677,56 @@
             };
 
             const resultsRes = await AuthLayer.authFetch('/api/patients/' + sp.id + '/results');
-            const results = await resultsRes.json();
-            for (const row of results) {
-              const session = this._sessionFromServerResult(row);
-              this.sessions[session.id] = session;
-              this.patients[sp.id].sessions.push(session);
+            if (resultsRes.ok) {
+              const results = await resultsRes.json();
+              for (const row of results) {
+                const session = this._sessionFromServerResult(row);
+                this.sessions[session.id] = session;
+                this.patients[sp.id].sessions.push(session);
+              }
             }
           }
 
           this._autoSave();
+
+          // Refresh UI views if App is available
+          if (typeof App !== 'undefined') {
+            if (App._populatePatientSelectors) App._populatePatientSelectors();
+            if (App.currentView === 'patients' && App.renderPatientList) App.renderPatientList();
+            if (App.currentView === 'dashboard' && App.renderDashboardAnalytics) App.renderDashboardAnalytics();
+            if (App.populateReportSessions) App.populateReportSessions();
+          }
         } catch (err) {
           console.warn('DataLayer.syncFromServer failed, using local cache instead:', err.message);
-          App.showNotification('Could not reach the backend — showing locally cached data, which may be out of date.', 'warning');
+          if (typeof App !== 'undefined' && App.showNotification) {
+            App.showNotification('Could not reach backend — using cached offline data.', 'warning');
+          }
         }
       },
 
       /** Pushes one session (completed or partial) up to the backend as an
-       * AssessmentResult, scoped to its patient via the auth'd ownership
-       * check. Fire-and-forget from the caller's point of view — failures
-       * are surfaced as a notification but never block the UI, since the
-       * session is already safely saved locally either way. */
+       * AssessmentResult, scoped to its patient via the auth'd ownership check. */
       async syncSessionToServer(sessionId) {
         const session = this.sessions[sessionId];
         if (!session) return;
+        const targetPatientId = session.patientId || (typeof AuthLayer !== 'undefined' ? AuthLayer.getCurrentPatientId() : null);
+        if (!targetPatientId) return;
         try {
-          await AuthLayer.authFetch('/api/patients/' + session.patientId + '/results', {
+          const res = await AuthLayer.authFetch('/api/patients/' + targetPatientId + '/results', {
             method: 'POST',
             body: JSON.stringify({
               protocol_type: session.protocolId || 'single-task',
               data: session,
             }),
           });
+          if (res.ok) {
+            console.log('Session successfully synchronized to PostgreSQL:', sessionId);
+          }
         } catch (err) {
           console.warn('Could not sync assessment result to server:', err.message);
-          App.showNotification('This result is saved on this device but could not be synced to the server.', 'warning');
+          if (typeof App !== 'undefined' && App.showNotification) {
+            App.showNotification('This result is saved locally but could not be synced to the server.', 'warning');
+          }
         }
       }
     };
@@ -13085,8 +13106,7 @@
         const session = DataLayer.getSession(sessionId);
         if (!session) return '<p>Session not found.</p>';
 
-        const age = DataLayer.getPatientAge(patientId);
-        const sex = patient.sex;
+        const taskResults = session.taskResults || [];
         const questionnaireResults = session.questionnaireResults || [];
 
         if (taskResults.length === 0 && questionnaireResults.length === 0) {
