@@ -9811,6 +9811,95 @@
         return results;
       },
 
+      /** Converts a server AssessmentResult row back into the local session shape. */
+      _sessionFromServerResult(row) {
+        const s = row.data || {};
+        return {
+          id: s.id || row.id,
+          patientId: row.patient_id,
+          date: s.date || row.created_at,
+          protocolId: s.protocolId || row.protocol_type || null,
+          protocolName: s.protocolName || null,
+          status: s.status || 'complete',
+          taskResults: s.taskResults || [],
+          questionnaireResults: s.questionnaireResults || [],
+        };
+      },
+
+      async syncFromServer() {
+        const user = typeof AuthLayer !== 'undefined' ? AuthLayer.getUser() : null;
+        if (!user) return;
+
+        try {
+          let serverPatients = [];
+          if (user.role === 'doctor' || user.role === 'caregiver') {
+            const res = await AuthLayer.authFetch('/api/patients');
+            if (res.ok) serverPatients = await res.json();
+          } else if (user.role === 'patient') {
+            const res = await AuthLayer.authFetch('/api/patients/me');
+            if (res.ok) {
+              const pData = await res.json();
+              if (pData && pData.id) serverPatients = [pData];
+            }
+          }
+
+          this.patients = {};
+          this.sessions = {};
+
+          for (const sp of serverPatients) {
+            const details = sp.details || {};
+            this.patients[sp.id] = {
+              id: sp.id,
+              patient_id: sp.patient_id || sp.id,
+              user_id: sp.user_id || sp.id,
+              name: sp.name,
+              dob: details.dob || '',
+              sex: details.sex || 'male',
+              handedness: details.handedness || '',
+              education: details.education || '',
+              notes: details.notes || '',
+              createdAt: sp.created_at,
+              sessions: [],
+            };
+
+            const resultsRes = await AuthLayer.authFetch('/api/patients/' + sp.id + '/results');
+            if (resultsRes.ok) {
+              const results = await resultsRes.json();
+              for (const row of results) {
+                const session = this._sessionFromServerResult(row);
+                this.sessions[session.id] = session;
+                this.patients[sp.id].sessions.push(session);
+              }
+            }
+          }
+
+          this._autoSave();
+        } catch (err) {
+          console.warn('DataLayer.syncFromServer failed in cognitive-assessment:', err.message);
+        }
+      },
+
+      async syncSessionToServer(sessionId) {
+        const session = this.sessions[sessionId];
+        if (!session) return;
+        const targetPatientId = session.patientId || (typeof AuthLayer !== 'undefined' && AuthLayer.getCurrentPatientId ? AuthLayer.getCurrentPatientId() : null);
+        if (!targetPatientId) return;
+        try {
+          const res = await AuthLayer.authFetch('/api/patients/' + targetPatientId + '/results', {
+            method: 'POST',
+            body: JSON.stringify({
+              protocol_type: session.protocolId || 'single-task',
+              data: session,
+            }),
+          });
+          if (res.ok) {
+            console.log('Session successfully synchronized to PostgreSQL:', sessionId);
+          }
+        } catch (err) {
+          console.warn('Could not sync assessment result to server:', err.message);
+        }
+      },
+
       // --- Persistence: JSON Export/Import ---
 
       async exportJSON() {
@@ -12287,7 +12376,7 @@
         this.executeCurrentStep();
       },
 
-      completeProtocol() {
+      async completeProtocol() {
         this._state = 'complete';
         this._stopTimer();
 
@@ -12299,7 +12388,7 @@
           session.protocolName = this._currentProtocol.name;
           DataLayer._autoSave();
           if (DataLayer.syncSessionToServer) {
-            DataLayer.syncSessionToServer(this._currentSessionId);
+            await DataLayer.syncSessionToServer(this._currentSessionId);
           }
         }
 

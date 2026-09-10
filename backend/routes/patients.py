@@ -209,7 +209,7 @@ def get_results(
     rows = (
         db.query(AssessmentResult)
         .filter(AssessmentResult.patient_id == profile.id)
-        .order_by(AssessmentResult.created_at.asc())
+        .order_by(AssessmentResult.created_at.desc())
         .all()
     )
     return [

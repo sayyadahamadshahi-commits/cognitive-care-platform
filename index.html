@@ -3941,6 +3941,12 @@
       // something to show immediately, then overwrite it with the
       // permission-scoped truth from the server.
       DataLayer.loadFromLocalStorage();
+      try {
+        await DataLayer.syncFromServer();
+      } catch (err) {
+        console.warn('Initial syncFromServer failed:', err);
+      }
+
       // Initialize multilingual system & apply stored language preference
       if (typeof I18n !== 'undefined') {
         I18n.init();
@@ -14006,7 +14012,7 @@
         this.executeCurrentStep();
       },
 
-      completeProtocol() {
+      async completeProtocol() {
         this._state = 'complete';
         this._stopTimer();
 
@@ -14017,7 +14023,9 @@
           session.protocolId = this._currentProtocol.id;
           session.protocolName = this._currentProtocol.name;
           DataLayer._autoSave();
-          DataLayer.syncSessionToServer(this._currentSessionId);
+          if (DataLayer.syncSessionToServer) {
+            await DataLayer.syncSessionToServer(this._currentSessionId);
+          }
         }
 
         if (typeof AppPatientStats !== 'undefined' && AppPatientStats.render) {
@@ -17743,7 +17751,7 @@
 
       // --- Reports ---
 
-      populateReportSessions() {
+      async populateReportSessions() {
         const isPat = AuthLayer.isPatient();
         const patientSelect = document.getElementById('report-patient-select');
         const sessionSelect = document.getElementById('report-session-select');
@@ -17762,7 +17770,16 @@
           return;
         }
 
-        const sessions = DataLayer.getPatientSessions(patientId);
+        let sessions = DataLayer.getPatientSessions(patientId);
+        if ((!sessions || sessions.length === 0) && DataLayer.syncFromServer) {
+          try {
+            await DataLayer.syncFromServer();
+            sessions = DataLayer.getPatientSessions(patientId);
+          } catch (e) {
+            console.warn('syncFromServer error in populateReportSessions:', e);
+          }
+        }
+
         if (!sessions || sessions.length === 0) {
           sessionSelect.innerHTML = '<option value="">-- No completed assessment sessions found --</option>';
           const contentDiv = document.getElementById('report-content');
