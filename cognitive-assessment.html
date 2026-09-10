@@ -9713,7 +9713,14 @@
       },
 
       getSession(sessionId) {
-        return this.sessions[sessionId] || null;
+        if (!sessionId) return null;
+        if (this.sessions[sessionId]) return this.sessions[sessionId];
+        for (const p of Object.values(this.patients || {})) {
+          for (const s of (p.sessions || [])) {
+            if (s.id === sessionId) return s;
+          }
+        }
+        return null;
       },
 
       getPatientSessions(patientId) {
@@ -11400,6 +11407,9 @@
 
         const session = DataLayer.getSession(sessionId);
         if (!session) return '<p>Session not found.</p>';
+
+        const age = DataLayer.getPatientAge ? DataLayer.getPatientAge(patientId) : (patient.dob ? (new Date().getFullYear() - new Date(patient.dob).getFullYear()) : 40);
+        const sex = patient.sex || 'unspecified';
 
         const taskResults = session.taskResults || [];
         const questionnaireResults = session.questionnaireResults || [];
@@ -14941,33 +14951,50 @@
       },
 
       generateReport() {
-        const patientId = document.getElementById('report-patient-select').value;
-        const sessionId = document.getElementById('report-session-select').value;
+        const patientSelect = document.getElementById('report-patient-select');
+        const sessionSelect = document.getElementById('report-session-select');
         const contentDiv = document.getElementById('report-content');
         const printBtn = document.getElementById('btn-print-report');
 
+        const patientId = patientSelect ? patientSelect.value : '';
+        const sessionId = sessionSelect ? sessionSelect.value : '';
+
         if (!patientId) {
-          this.showNotification('Select a patient first.', 'warning');
+          if (typeof this.showNotification === 'function') this.showNotification('Select a patient first.', 'warning');
           return;
         }
         if (!sessionId) {
-          this.showNotification('Select a session first.', 'warning');
+          if (typeof this.showNotification === 'function') this.showNotification('Select a session first.', 'warning');
           return;
         }
 
-        const html = ReportEngine.generateReport(patientId, sessionId);
-        contentDiv.innerHTML = html;
+        try {
+          const html = ReportEngine.generateReport(patientId, sessionId);
+          if (contentDiv) contentDiv.innerHTML = html;
 
-        // Update print header with patient name, date, and protocol
-        const patient = DataLayer.getPatient(patientId);
-        const session = DataLayer.getSession(sessionId);
-        const printHeader = document.getElementById('report-print-header');
-        if (printHeader && patient && session) {
-          const protoName = session.protocolName || session.protocolId || '';
-          printHeader.textContent = patient.name + ' \u2014 ' + new Date(session.date).toLocaleDateString() + (protoName ? ' \u2014 ' + protoName : '');
+          const patient = DataLayer.getPatient(patientId);
+          const session = DataLayer.getSession(sessionId);
+          const printHeader = document.getElementById('report-print-header');
+          if (printHeader && patient && session) {
+            const protoName = session.protocolName || session.protocolId || '';
+            const d = new Date(session.date || session.created_at || Date.now());
+            const dStr = !isNaN(d.getTime()) ? d.toLocaleDateString() : '';
+            printHeader.textContent = (patient.name || 'Patient') + (dStr ? ' \u2014 ' + dStr : '') + (protoName ? ' \u2014 ' + protoName : '');
+          }
+
+          if (printBtn) printBtn.style.display = 'inline-flex';
+        } catch (err) {
+          console.error('Failed to generate report:', err);
+          if (contentDiv) {
+            contentDiv.innerHTML = `<div class="card" style="padding: 24px; text-align: center; color: #e74c3c;">
+              <h3>Unable to generate report</h3>
+              <p style="color: var(--color-text-secondary); margin-top: 8px;">The assessment data could not be rendered: ${err.message}</p>
+            </div>`;
+          }
+          if (typeof this.showNotification === 'function') {
+            this.showNotification('Unable to generate report: ' + err.message, 'error');
+          }
         }
-
-        if (printBtn) printBtn.style.display = 'inline-flex';
       },
 
       // --- Export/Import ---
