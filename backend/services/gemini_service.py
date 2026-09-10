@@ -57,7 +57,7 @@ def ask_gemini(messages: list[dict], model: str | None = None) -> str:
             response = client.chat.completions.create(
                 model=chosen_model,
                 messages=messages,
-                max_tokens=500,
+                max_tokens=2048,
                 temperature=0.6,
             )
             break
@@ -79,4 +79,7 @@ def ask_gemini(messages: list[dict], model: str | None = None) -> str:
     choice = response.choices[0] if response.choices else None
     if not choice or not choice.message or not choice.message.content:
         return "I didn't get a response back — please try again."
-    return choice.message.content.strip()
+    text = choice.message.content.strip()
+    if getattr(choice, 'finish_reason', None) == 'length':
+        text += "\n\n[Response reached maximum length limit.]"
+    return text

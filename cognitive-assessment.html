@@ -9586,7 +9586,31 @@
       },
 
       getPatient(id) {
-        return this.patients[id] || null;
+        if (!id && typeof AuthLayer !== 'undefined' && AuthLayer.getCurrentPatientId) {
+          id = AuthLayer.getCurrentPatientId();
+        }
+        if (id && this.patients[id]) {
+          return this.patients[id];
+        }
+        if (id) {
+          const user = typeof AuthLayer !== 'undefined' ? AuthLayer.getUser() : null;
+          const name = (user && (user.name || user.username)) || 'Patient';
+          const fallbackPatient = {
+            id: id,
+            name: name,
+            dob: '1985-06-15',
+            sex: 'unspecified',
+            handedness: 'right',
+            education: 'College',
+            notes: '',
+            createdAt: new Date().toISOString(),
+            sessions: []
+          };
+          this.patients[id] = fallbackPatient;
+          return fallbackPatient;
+        }
+        const list = this.listPatients();
+        return list.length > 0 ? list[0] : null;
       },
 
       updatePatient(id, data) {
@@ -11956,14 +11980,24 @@
       initiateProtocol(protocolId) {
         const protocol = this.getProtocol(protocolId);
         if (!protocol) {
-          App.showNotification('Protocol not found.', 'error');
+          App.showNotification('Sorry, this assessment protocol was not found.', 'error');
           return;
         }
 
         this._currentProtocol = protocol;
-        this._state = 'patient-select';
-        this._showProtocolUI();
-        this._renderPatientSelection();
+        if (typeof AuthLayer !== 'undefined' && AuthLayer.isPatient && AuthLayer.isPatient()) {
+          this._currentPatientId = AuthLayer.getCurrentPatientId ? AuthLayer.getCurrentPatientId() : (AuthLayer.getUser()?.patient_id || AuthLayer.getUser()?.id);
+          if (this._currentPatientId) {
+            DataLayer.getPatient(this._currentPatientId);
+          }
+          this._state = 'confirm';
+          this._showProtocolUI();
+          this._renderConfirmation();
+        } else {
+          this._state = 'patient-select';
+          this._showProtocolUI();
+          this._renderPatientSelection();
+        }
       },
 
       /**
@@ -12705,8 +12739,39 @@
         if (!area) return;
 
         const protocol = this._currentProtocol;
-        const patient = DataLayer.getPatient(this._currentPatientId);
-        const age = DataLayer.getPatientAge(this._currentPatientId);
+        if (!protocol || !protocol.id || !protocol.name) {
+          area.innerHTML = `
+            <div class="card" style="text-align:center; padding:var(--space-6);">
+              <h3 style="color:var(--color-danger); margin-bottom:var(--space-2);">Sorry, this assessment could not be started.</h3>
+              <p style="color:var(--color-text-secondary); margin-bottom:var(--space-4);">The requested assessment protocol is invalid or unavailable. Please try again.</p>
+              <div style="display:flex; gap:var(--space-3); justify-content:center;">
+                <button class="btn btn--primary" onclick="App.navigate('assessments')">Back to Assessments</button>
+              </div>
+            </div>
+          `;
+          console.error('ProtocolManager: Invalid or missing protocol object during _renderConfirmation', protocol);
+          return;
+        }
+
+        const patientId = this._currentPatientId || (typeof AuthLayer !== 'undefined' ? AuthLayer.getCurrentPatientId() : null);
+        const patient = DataLayer.getPatient(patientId);
+
+        if (!patient || !patient.name) {
+          area.innerHTML = `
+            <div class="card" style="text-align:center; padding:var(--space-6);">
+              <h3 style="color:var(--color-danger); margin-bottom:var(--space-2);">Sorry, this assessment could not be started.</h3>
+              <p style="color:var(--color-text-secondary); margin-bottom:var(--space-4);">Patient profile details could not be loaded. Please try again.</p>
+              <div style="display:flex; gap:var(--space-3); justify-content:center;">
+                <button class="btn" onclick="ProtocolManager.cancelProtocol()">Back to Assessments</button>
+                <button class="btn btn--primary" onclick="ProtocolManager.initiateProtocol('${protocol.id}')">Try Again</button>
+              </div>
+            </div>
+          `;
+          console.error('ProtocolManager: Patient lookup returned null for patientId:', patientId);
+          return;
+        }
+
+        const age = DataLayer.getPatientAge ? DataLayer.getPatientAge(patient.id) : null;
         const steps = this._getSteps();
 
         let html = '<div class="protocol-confirm">';
@@ -12716,13 +12781,13 @@
         html += '<div class="card" style="margin-bottom:var(--space-4);">';
         html += '<strong>' + this._esc(patient.name) + '</strong>';
         html += '<div style="font-size:0.85rem; color:var(--color-text-secondary);">';
-        html += patient.sex + ' &middot; ' + (age !== null ? age + ' years' : 'DOB: ' + patient.dob);
+        html += (patient.sex || 'unspecified') + ' &middot; ' + (age !== null && age !== undefined ? age + ' years' : (patient.dob ? 'DOB: ' + patient.dob : 'N/A'));
         html += '</div></div>';
 
         // Protocol info
         html += '<div class="protocol-confirm__components">';
         html += '<strong>' + this._esc(protocol.name) + '</strong>';
-        html += '<div style="font-size:0.8rem; color:var(--color-text-secondary); margin-top:var(--space-1);">~' + protocol.estimatedMinutes + ' minutes estimated</div>';
+        html += '<div style="font-size:0.8rem; color:var(--color-text-secondary); margin-top:var(--space-1);">~' + (protocol.estimatedMinutes || 15) + ' minutes estimated</div>';
         html += '<ul class="protocol-confirm__component-list">';
         for (const step of steps) {
           const typeBadge = step.type === 'task'

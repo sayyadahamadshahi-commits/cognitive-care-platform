@@ -51,7 +51,7 @@ def ask_anthropic(messages: list[dict], model: str | None = None) -> str:
     try:
         response = client.messages.create(
             model=chosen_model,
-            max_tokens=500,
+            max_tokens=2048,
             system=system_prompt or None,
             messages=turns,
         )
@@ -61,4 +61,7 @@ def ask_anthropic(messages: list[dict], model: str | None = None) -> str:
     block = next((b for b in response.content if b.type == "text"), None)
     if not block or not block.text:
         return "I didn't get a response back — please try again."
-    return block.text.strip()
+    text = block.text.strip()
+    if getattr(response, 'stop_reason', None) == 'max_tokens':
+        text += "\n\n[Response reached maximum length limit.]"
+    return text

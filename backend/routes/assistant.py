@@ -11,10 +11,8 @@ from services.ai_provider import ask_ai, AIConfigError, current_provider
 
 router = APIRouter()
 
-# Hard ceiling on the whole request, slightly under the frontend's 25s
-# AbortController, so the backend replies with a clean JSON error instead
-# of the connection just getting cut from the client side.
-CHAT_TIMEOUT_SECONDS = 22
+# Hard ceiling on the whole request, allowing time for full multi-paragraph responses
+CHAT_TIMEOUT_SECONDS = 45
 
 LANGUAGE_NAMES = {
     'en': 'English', 'hi': 'Hindi', 'te': 'Telugu', 'ta': 'Tamil', 'kn': 'Kannada',
@@ -33,10 +31,9 @@ Rules:
 - Do not claim that an assessment proves a medical diagnosis.
 - If asked for medical diagnosis or emergency advice, recommend consulting
   an appropriate healthcare professional.
-- Keep answers concise (roughly 3-6 sentences) and in plain language, since
-  replies may be read aloud by text-to-speech.
-- Do not use markdown formatting (no #, *, `, etc.) — plain sentences only,
-  because the output may be spoken.
+- Provide clear, complete, and helpful answers in plain language. If the user asks for
+  exercises, routines, steps, or detailed explanations, provide the complete response
+  without truncation or omitting steps.
 """
 
 
