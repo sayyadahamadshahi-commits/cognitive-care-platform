@@ -9593,10 +9593,15 @@
           return this.patients[id];
         }
         if (id) {
+          const matched = Object.values(this.patients || {}).find(p => p.id === id || p.user_id === id || p.patient_id === id);
+          if (matched) return matched;
+
           const user = typeof AuthLayer !== 'undefined' ? AuthLayer.getUser() : null;
           const name = (user && (user.name || user.username)) || 'Patient';
           const fallbackPatient = {
             id: id,
+            user_id: user ? (user.user_id || user.id) : id,
+            patient_id: id,
             name: name,
             dob: '1985-06-15',
             sex: 'unspecified',
@@ -9648,14 +9653,14 @@
       // --- Session Management ---
 
       createSession(patientId, protocolId) {
-        const patient = this.patients[patientId];
+        const patient = this.getPatient(patientId);
         if (!patient) return null;
 
         const id = generateUUID();
         const now = new Date().toISOString();
         const session = {
           id: id,
-          patientId: patientId,
+          patientId: patient.id || patientId,
           date: now,
           protocolId: protocolId || null,
           status: 'in_progress',
@@ -9664,6 +9669,7 @@
         };
 
         this.sessions[id] = session;
+        if (!patient.sessions) patient.sessions = [];
         patient.sessions.push(session);
         this._autoSave();
         return id;
@@ -9711,9 +9717,15 @@
       },
 
       getPatientSessions(patientId) {
-        const patient = this.patients[patientId];
-        if (!patient) return [];
-        return patient.sessions || [];
+        if (!patientId) return [];
+        let patient = this.patients[patientId];
+        if (!patient) {
+          patient = Object.values(this.patients || {}).find(p => p.id === patientId || p.user_id === patientId || p.patient_id === patientId);
+        }
+        if (!patient) {
+          patient = this.getPatient(patientId);
+        }
+        return (patient && patient.sessions) ? patient.sessions : [];
       },
 
       /**

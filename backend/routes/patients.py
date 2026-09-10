@@ -14,6 +14,8 @@ def _serialize_patient(profile: PatientProfile) -> dict:
     doc = profile.doctor
     return {
         "id": profile.id,
+        "patient_id": profile.id,
+        "user_id": profile.user_id,
         "name": profile.user.name,
         "username": profile.user.username,
         "doctor_id": profile.doctor_id,

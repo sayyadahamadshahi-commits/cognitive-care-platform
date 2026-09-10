@@ -11186,10 +11186,15 @@
           return this.patients[id];
         }
         if (id) {
+          const matched = Object.values(this.patients || {}).find(p => p.id === id || p.user_id === id || p.patient_id === id);
+          if (matched) return matched;
+
           const user = typeof AuthLayer !== 'undefined' ? AuthLayer.getUser() : null;
           const name = (user && (user.name || user.username)) || 'Patient';
           const fallbackPatient = {
             id: id,
+            user_id: user ? (user.user_id || user.id) : id,
+            patient_id: id,
             name: name,
             dob: '1985-06-15',
             sex: 'unspecified',
@@ -11241,14 +11246,14 @@
       // --- Session Management ---
 
       createSession(patientId, protocolId) {
-        const patient = this.patients[patientId];
+        const patient = this.getPatient(patientId);
         if (!patient) return null;
 
         const id = generateUUID();
         const now = new Date().toISOString();
         const session = {
           id: id,
-          patientId: patientId,
+          patientId: patient.id || patientId,
           date: now,
           protocolId: protocolId || null,
           status: 'in_progress',
@@ -11257,6 +11262,7 @@
         };
 
         this.sessions[id] = session;
+        if (!patient.sessions) patient.sessions = [];
         patient.sessions.push(session);
         this._autoSave();
         return id;
@@ -11304,9 +11310,15 @@
       },
 
       getPatientSessions(patientId) {
-        const patient = this.patients[patientId];
-        if (!patient) return [];
-        return patient.sessions || [];
+        if (!patientId) return [];
+        let patient = this.patients[patientId];
+        if (!patient) {
+          patient = Object.values(this.patients || {}).find(p => p.id === patientId || p.user_id === patientId || p.patient_id === patientId);
+        }
+        if (!patient) {
+          patient = this.getPatient(patientId);
+        }
+        return (patient && patient.sessions) ? patient.sessions : [];
       },
 
       /**
@@ -11666,6 +11678,8 @@
             const details = sp.details || {};
             this.patients[sp.id] = {
               id: sp.id,
+              patient_id: sp.patient_id || sp.id,
+              user_id: sp.user_id || sp.id,
               name: sp.name,
               dob: details.dob || '',
               sex: details.sex || 'male',
@@ -17725,14 +17739,34 @@
         const sessionSelect = document.getElementById('report-session-select');
         if (!sessionSelect) return;
 
-        const patientId = isPat ? AuthLayer.getUser()?.patient_id : (patientSelect ? patientSelect.value : '');
-        sessionSelect.innerHTML = '<option value="">-- Select Session --</option>';
+        const patientId = isPat
+          ? (AuthLayer.getCurrentPatientId ? AuthLayer.getCurrentPatientId() : (AuthLayer.getUser()?.patient_id || AuthLayer.getUser()?.id))
+          : (patientSelect ? patientSelect.value : '');
 
-        if (!patientId) return;
+        sessionSelect.innerHTML = '';
+
+        if (!patientId) {
+          sessionSelect.innerHTML = '<option value="">-- Select Patient First --</option>';
+          const contentDiv = document.getElementById('report-content');
+          if (contentDiv) contentDiv.innerHTML = '<div style="text-align:center; padding: 40px; color: var(--color-text-secondary, #64748b);">Please select a patient to view available sessions and reports.</div>';
+          return;
+        }
 
         const sessions = DataLayer.getPatientSessions(patientId);
+        if (!sessions || sessions.length === 0) {
+          sessionSelect.innerHTML = '<option value="">-- No completed assessment sessions found --</option>';
+          const contentDiv = document.getElementById('report-content');
+          if (contentDiv) contentDiv.innerHTML = '<div style="text-align:center; padding: 40px; color: var(--color-text-secondary, #64748b);">No completed assessment sessions found for this patient.</div>';
+          return;
+        }
+
+        sessionSelect.innerHTML = '<option value="">-- Select Session --</option>';
         for (const s of sessions) {
-          const date = new Date(s.date);
+          const date = new Date(s.date || s.created_at || Date.now());
+          const dateStr = !isNaN(date.getTime())
+            ? (date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+            : (s.date || 'Unknown Date');
+
           const taskCount = (s.taskResults || []).length;
           const qCount = (s.questionnaireResults || []).length;
           const parts = [];
@@ -17740,9 +17774,10 @@
           if (qCount > 0) parts.push(qCount + ' questionnaire' + (qCount !== 1 ? 's' : ''));
           if (parts.length === 0) parts.push('empty');
 
+          const protoName = s.protocolName || s.protocolId || 'Assessment';
           const opt = document.createElement('option');
           opt.value = s.id;
-          opt.textContent = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + parts.join(', ') + ')';
+          opt.textContent = protoName + ' — ' + dateStr + ' (' + parts.join(', ') + ')';
           sessionSelect.appendChild(opt);
         }
 
