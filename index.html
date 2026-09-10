@@ -13996,6 +13996,10 @@
           DataLayer.syncSessionToServer(this._currentSessionId);
         }
 
+        if (typeof AppPatientStats !== 'undefined' && AppPatientStats.render) {
+          AppPatientStats.render();
+        }
+
         // Run classification
         const classification = this._classifyResults();
 
@@ -17781,6 +17785,43 @@
         if (printBtn) printBtn.style.display = 'inline-flex';
       },
 
+      async viewReport(patientId, sessionId) {
+        if (!patientId || !sessionId) return;
+        this._populatePatientSelectors();
+        const patientSelect = document.getElementById('report-patient-select');
+        const sessionSelect = document.getElementById('report-session-select');
+        if (patientSelect) {
+          if (!Array.from(patientSelect.options).some(opt => opt.value === patientId)) {
+            const p = DataLayer.getPatient(patientId);
+            if (p) {
+              const opt = document.createElement('option');
+              opt.value = p.id;
+              opt.textContent = p.name;
+              patientSelect.appendChild(opt);
+            }
+          }
+          patientSelect.value = patientId;
+        }
+
+        this.populateReportSessions();
+
+        if (sessionSelect) {
+          if (!Array.from(sessionSelect.options).some(opt => opt.value === sessionId)) {
+            const s = DataLayer.getSession(sessionId);
+            if (s) {
+              const opt = document.createElement('option');
+              opt.value = s.id;
+              opt.textContent = new Date(s.date).toLocaleDateString() + ' (Completed)';
+              sessionSelect.appendChild(opt);
+            }
+          }
+          sessionSelect.value = sessionId;
+        }
+
+        this.navigate('reports');
+        this.generateReport();
+      },
+
       // --- Export/Import ---
 
       async exportAllData() {
@@ -18625,7 +18666,7 @@
             html += '<strong style="font-size:0.9rem;">' + date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</strong>' + statusBadge;
             html += '<div style="font-size:0.8rem; color:var(--color-text-secondary);">' + this._escapeHtml(protocolName) + ' &middot; ' + taskCount + ' task' + (taskCount !== 1 ? 's' : '') + ', ' + qCount + ' questionnaire' + (qCount !== 1 ? 's' : '') + '</div>';
             html += '</div>';
-            html += '<button class="btn" style="font-size:0.8rem; min-height:32px;" onclick="document.getElementById(\'report-patient-select\').value=\'' + patientId + '\';App.navigate(\'reports\');App.populateReportSessions();setTimeout(function(){document.getElementById(\'report-session-select\').value=\'' + s.id + '\';App.generateReport();},100);">View Report</button>';
+            html += '<button class="btn" style="font-size:0.8rem; min-height:32px;" onclick="App.viewReport(\'' + patientId + '\', \'' + s.id + '\')">View Report</button>';
             html += '</div>';
           }
         }
@@ -18801,28 +18842,38 @@
         // Apply translations to data-i18n elements on the page
         if (typeof I18n !== 'undefined') I18n.applyAll();
 
-        const patientId = user.patient_id || '';
+        const patientId = (typeof AuthLayer !== 'undefined' && AuthLayer.getCurrentPatientId ? AuthLayer.getCurrentPatientId() : null) || user.patient_id || user.user_id || user.id || '';
         const sessions = patientId ? DataLayer.getPatientSessions(patientId) : [];
 
-        // --- Progress rings from latest session ---
+        // --- Progress rings from completed sessions ---
         const ringsEl = document.getElementById('patient-stat-rings');
         if (ringsEl) {
           if (sessions.length > 0) {
-            const latest = sessions[sessions.length - 1];
-            const taskResults = latest.taskResults || [];
+            const allTaskResults = [];
+            for (const s of sessions) {
+              if (s.taskResults && s.taskResults.length > 0) {
+                allTaskResults.push(...s.taskResults);
+              }
+            }
             // Aggregate normalised scores per domain
             const domainMap = {
-              Memory: ['paired_associates', 'digit_span', 'spatial_span'],
+              Memory: ['paired_associates', 'digit_span', 'spatial_span', 'number_ladder'],
               Focus:  ['feature_match', 'double_trouble'],
-              Reasoning: ['odd_one_out', 'grammatical_reasoning', 'rotations'],
+              Reasoning: ['odd_one_out', 'grammatical_reasoning', 'rotations', 'polygons'],
               Planning: ['spatial_planning', 'token_search'],
             };
             const i18nActive = typeof I18n !== 'undefined';
             let html = '';
             for (const [domain, tasks] of Object.entries(domainMap)) {
-              const scores = taskResults
+              const scores = allTaskResults
                 .filter(r => tasks.includes(r.task || r.taskId))
-                .map(r => typeof r.normScore === 'number' ? r.normScore : (typeof r.percentile === 'number' ? r.percentile : null))
+                .map(r => {
+                  if (typeof r.normScore === 'number') return r.normScore;
+                  if (typeof r.percentile === 'number') return r.percentile;
+                  if (r.percentile && typeof r.percentile.percentile === 'number') return r.percentile.percentile;
+                  if (typeof r.standardScore === 'number') return Math.max(0, Math.min(100, Math.round(((r.standardScore - 70) / 60) * 100)));
+                  return null;
+                })
                 .filter(v => v !== null);
               const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
               const sub = avg !== null ? `${scores.length} task${scores.length !== 1 ? 's' : ''}` : (i18nActive ? I18n.t('progress.no_data') : 'No data');

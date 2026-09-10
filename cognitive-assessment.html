@@ -12276,6 +12276,13 @@
           session.protocolId = this._currentProtocol.id;
           session.protocolName = this._currentProtocol.name;
           DataLayer._autoSave();
+          if (DataLayer.syncSessionToServer) {
+            DataLayer.syncSessionToServer(this._currentSessionId);
+          }
+        }
+
+        if (typeof AppPatientStats !== 'undefined' && AppPatientStats.render) {
+          AppPatientStats.render();
         }
 
         // Run classification
